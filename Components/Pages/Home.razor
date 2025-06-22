@@ -1,18 +1,15 @@
 ﻿@page "/"
 @inject BlazorControlCenter.Services.ServerStateService StateService
 @implements IDisposable
+@rendermode InteractiveServer
+@using BlazorControlCenter.Services
+
 
 <PageTitle>Arduino Dashboard</PageTitle>
 
 <div class="container-fluid vh-100 d-flex flex-column">
     <header class="py-2">
         <h1>Arduino TCP Dashboard</h1>
-        <header class="py-2">
-            <h1>Arduino TCP Dashboard</h1>
-
-            <button class="btn btn-info" @onclick="TestLog">Add Test Log Message</button>
-
-        </header>
     </header>
 
     <main class="row flex-grow-1" style="overflow-y: hidden;">
@@ -23,12 +20,11 @@
                 {
                     @foreach (var client in StateService.Clients.Values.OrderBy(c => c.Id))
                     {
-                        <div class="list-group-item">
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
                             <span class="fw-bold">@client.Name</span>
-                            <div class="input-group mt-2">
-                                <input @bind="commandTexts[client.Id]" class="form-control" placeholder="Send command..." @onkeyup="@((KeyboardEventArgs e) => HandleKeyPress(e, client))" />
-                                <button class="btn btn-outline-primary" @onclick="() => SendCommand(client)">Send</button>
-                            </div>
+                            
+                            <!-- CORRECTED: This now calls a helper method, which is the cleanest approach -->
+                            <button class="btn btn-outline-primary" @onclick="@(() => SendToggleCommand(client))">Toggle Light</button>
                         </div>
                     }
                 }
@@ -52,48 +48,29 @@
 </div>
 
 @code {
-    // This dictionary holds the text for each client's input box.
-    private Dictionary<int, string> commandTexts = new Dictionary<int, string>();
-
     // This method runs once when the component is created.
     protected override void OnInitialized()
     {
-        // Subscribe to the state change event.
         StateService.OnChange += OnStateChanged;
     }
 
     // This method is called by the event when new data arrives.
     private void OnStateChanged()
     {
-        // Ensure new clients have an entry in our commandTexts dictionary.
-        foreach (var client in StateService.Clients.Values)
-        {
-            commandTexts.TryAdd(client.Id, string.Empty);
-        }
-
-        // Tell Blazor to re-render the UI. InvokeAsync is used because the
-        // event might come from a background thread.
+        // This ensures the UI refreshes safely from any thread.
         InvokeAsync(StateHasChanged);
     }
 
-    // This is the method for the @onkeyup event.
-    // It checks if the key was "Enter".
-    private void HandleKeyPress(KeyboardEventArgs e, ArduinoClient client)
+    // NEW HELPER: This method makes the HTML cleaner. It calls the main SendCommand method.
+    private void SendToggleCommand(ArduinoClient client)
     {
-        if (e.Key == "Enter")
-        {
-            // If it was Enter, it calls the SendCommand method below.
-            SendCommand(client);
-        }
+        SendCommand(client, "LIGHT_TOG");
     }
 
-    // THIS IS THE SendCommand METHOD.
-    // It is called by both the "Send" button's @onclick event
-    // and the HandleKeyPress method above.
-    private void SendCommand(ArduinoClient client)
+    // This is the main method for sending any command.
+    private void SendCommand(ArduinoClient client, string command)
     {
-        // Get the specific command for this client from our dictionary.
-        if (!commandTexts.TryGetValue(client.Id, out var command) || string.IsNullOrWhiteSpace(command))
+        if (string.IsNullOrWhiteSpace(command))
         {
             return;
         }
@@ -105,9 +82,6 @@
             stream.Write(buffer, 0, buffer.Length);
             stream.Flush();
             StateService.AddLogMessage($"Sent '{command}' to Client {client.Id}");
-
-            // Clear the input box for this specific client.
-            commandTexts[client.Id] = string.Empty;
         }
         catch (Exception ex)
         {
@@ -115,15 +89,9 @@
         }
     }
 
-    private void TestLog()
-    {
-        StateService.AddLogMessage("UI TEST: The button was clicked and the UI updated!");
-    }
-
     // This method runs when the user navigates away from the page.
     public void Dispose()
     {
-        // Unsubscribe from the event to prevent memory leaks.
         StateService.OnChange -= OnStateChanged;
     }
 }
