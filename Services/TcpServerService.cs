@@ -87,7 +87,8 @@ public class TcpServerService : IHostedService
                 string data = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
 
                 // 7. Report incoming data to the state service
-                _stateService.AddLogMessage($"Received from Client {clientId}: {data}");
+
+                _stateService.ProcessClientData(clientId, data);
 
                 // Optional: Send acknowledgment
                 var ackMessage = "ACK: " + data + "\n";

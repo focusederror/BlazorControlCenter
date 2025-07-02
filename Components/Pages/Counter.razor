@@ -1,19 +1,77 @@
 ﻿@page "/counter"
+@inject BlazorControlCenter.Services.ServerStateService StateService
 @rendermode InteractiveServer
+@using ApexCharts
 
-<PageTitle>Counter</PageTitle>
+
+<PageTitle>Debug</PageTitle>
 
 <h1>Counter</h1>
 
-<p role="status">Current count: @currentCount</p>
 
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+
+<p>
+    <button @onclick="@(e => UpdateData(400))">
+        @message
+    </button>
+</p>
+
+
+<DemoContainer>
+    <ApexChart TItem="Scd4xDataPoint"
+    Title="Basic Sample"
+    Options="options"
+    @ref=Chart>
+
+        <ApexPointSeries TItem="Scd4xDataPoint"
+        Items="dataPoints"
+        SeriesType="@SeriesType.Line"
+        Name="CO2 ppm"
+        XValue="@(e => (e.Timestamp))"
+        YValue="@(e => e.CO2)"
+        OrderBy="e=>e.X" />
+
+    </ApexChart>
+</DemoContainer>
 
 @code {
-    private int currentCount = 0;
+    private List<Scd4xDataPoint> dataPoints { get; set; } = new();
+    ApexChart<Scd4xDataPoint> Chart;
+    private ApexChartOptions<Scd4xDataPoint> options { get; set; } = new();
+    private string message = "Press me bitch";
 
-    private void IncrementCount()
+    protected override void OnInitialized()
     {
-        currentCount++;
+        options.PlotOptions = new PlotOptions
+            {
+                Line = new PlotOptionsLine
+                {
+                    Colors = new LineColors
+                    {
+                        Threshold = 900,
+                        ColorAboveThreshold = "#ff0000",
+                        ColorBelowThreshold = "#0088ee"
+                    }
+                }
+            };
+
+        StateService.OnScd4xDataReady += HandleDataPoint;
     }
+
+    private async void UpdateData(int co2Point)
+    {
+        Random rng = new Random();
+        dataPoints.Add(new Scd4xDataPoint(rng.Next(300,1600), 34, 67, 2020));
+        message = $"dataPoints is {dataPoints.Count} items long";
+        StateHasChanged();
+        await Chart.UpdateSeriesAsync(true);
+    }
+
+    private void HandleDataPoint(Scd4xDataPoint dataPoint)
+    {
+        dataPoints.Add(dataPoint);
+        StateHasChanged();
+    }
+
+
 }

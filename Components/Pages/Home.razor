@@ -3,16 +3,17 @@
 @implements IDisposable
 @rendermode InteractiveServer
 @using BlazorControlCenter.Services
+@using ApexCharts
 
 
 <PageTitle>Arduino Dashboard</PageTitle>
 
-<div class="container-fluid vh-100 d-flex flex-column">
+<div class="container-fluid vh-100">
     <header class="py-2">
         <h1>Arduino TCP Dashboard</h1>
     </header>
 
-    <main class="row flex-grow-1" style="overflow-y: hidden;">
+    <main style="overflow-y: hidden;">
         <div class="col-4 d-flex flex-column">
             <h3>Connected Clients</h3>
             <div class="list-group flex-grow-1" style="overflow-y: auto;">
@@ -22,10 +23,25 @@
                     {
                         <div class="list-group-item d-flex justify-content-between align-items-center">
                             <span class="fw-bold">@client.Name</span>
-                            
-                            <!-- CORRECTED: This now calls a helper method, which is the cleanest approach -->
-                            <button class="btn btn-outline-primary" @onclick="@(() => SendToggleCommand(client))">Toggle Light</button>
+
+
                         </div>
+                        <ApexChart TItem="Scd4xDataPoint"
+                        Title="Sample Data"
+                        Options="options"
+                        @ref=Charts[client.Id]>
+
+                            <ApexPointSeries TItem="Scd4xDataPoint"
+                            Items="dataPoints"
+                            Name="CO2"
+                            SeriesType="SeriesType.Line"
+                            XValue="e => e.Timestamp"
+                            YValue="e => e.CO2"
+                            OrderBy="e=>e.X" />
+                            />
+
+                        </ApexChart>
+
                     }
                 }
                 else
@@ -35,22 +51,41 @@
             </div>
         </div>
 
-        <div class="col-8 d-flex flex-column">
-            <h3>Activity Log</h3>
-            <div id="log-container" class="bg-dark text-white p-3 rounded flex-grow-1" style="overflow-y: scroll; font-family: Consolas, monospace; font-size: 0.9em;">
-                @foreach (var msg in StateService.LogMessages)
-                {
-                    <div>@msg</div>
-                }
+        <div>
+            <div class="col-8 d-flex flex-column">
+                <h3>Activity Log</h3>
+                <div id="log-container" class="bg-dark text-white p-3 rounded flex-grow-1" style="overflow-y: scroll; font-family: Consolas, monospace; font-size: 0.9em;">
+                    @foreach (var msg in StateService.LogMessages)
+                    {
+                        <div>@msg</div>
+                    }
+                </div>
             </div>
         </div>
     </main>
 </div>
 
 @code {
+
+
+    public List<ClientDataGraph> Charts = new List<ClientDataGraph>();
+
     // This method runs once when the component is created.
     protected override void OnInitialized()
     {
+        options.PlotOptions = new PlotOptions
+            {
+                Line = new PlotOptionsLine
+                {
+                    Colors = new LineColors
+                    {
+                        Threshold = 900,
+                        ColorAboveThreshold = "#ff0000",
+                        ColorBelowThreshold = "#0088ee"
+                    }
+                }
+            };
+        StateService.OnScd4xDataReady += UpdateData;
         StateService.OnChange += OnStateChanged;
     }
 
@@ -61,37 +96,34 @@
         InvokeAsync(StateHasChanged);
     }
 
-    // NEW HELPER: This method makes the HTML cleaner. It calls the main SendCommand method.
-    private void SendToggleCommand(ArduinoClient client)
+    private async void UpdateData(Scd4xDataPoint dataPoint)
     {
-        SendCommand(client, "LIGHT_TOG");
+        for (int i = 0; i < Charts.Count; i++)
+        {
+            ClientDataGraph clientDataGraph = Charts.Find(x => x.clientId == 0);
+        }
+
+        //chart.data
+        await Chart.UpdateSeriesAsync(true);
     }
 
-    // This is the main method for sending any command.
-    private void SendCommand(ArduinoClient client, string command)
-    {
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            return;
-        }
-
-        try
-        {
-            var stream = client.TcpClient.GetStream();
-            byte[] buffer = System.Text.Encoding.ASCII.GetBytes(command + "\n");
-            stream.Write(buffer, 0, buffer.Length);
-            stream.Flush();
-            StateService.AddLogMessage($"Sent '{command}' to Client {client.Id}");
-        }
-        catch (Exception ex)
-        {
-            StateService.AddLogMessage($"Error sending to Client {client.Id}: {ex.Message}");
-        }
-    }
-
-    // This method runs when the user navigates away from the page.
     public void Dispose()
     {
         StateService.OnChange -= OnStateChanged;
+    }
+
+
+    public class ClientDataGraph
+    {
+        public int clientId { get; set; }
+        private List<Scd4xDataPoint> dataPoints = new();
+        private ApexChart<Scd4xDataPoint> Chart = new ApexChart<Scd4xDataPoint>();
+        private string chartType { get; set; } = "";
+
+        public ClientDataGraph(int id, string type)
+        {
+            clientId = id;
+            chartType = type;
+        }
     }
 }
