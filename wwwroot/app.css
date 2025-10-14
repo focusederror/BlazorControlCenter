@@ -1,6 +1,16 @@
-html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    
+:root {
+    --mud-palette-primary: #4caf50; /* custom green */
+    --mud-palette-secondary: #03a9f4;
+    --mud-palette-background: #121212;
+    --mud-palette-surface: #1e1e1e;
+    --mud-palette-text-primary: #e0e0e0;
+    --mud-palette-text-secondary: #b0b0b0;
+}
+
+body {
+    background-color: var(--mud-palette-background);
+    color: var(--mud-palette-text-primary);
+    font-family: "Roboto", sans-serif;
 }
 
 a, .btn-link {
@@ -9,8 +19,8 @@ a, .btn-link {
 
 .btn-primary {
     color: #fff;
-    background-color: #1b6ec2;
-    border-color: #1861ac;
+    background-color: #1e1e2d;
+    border-color: #1a1a27;
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {

@@ -1,11 +1,21 @@
 ﻿using System.Net.Sockets;
-using static BlazorControlCenter.Components.Pages.Home;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+//using static BlazorControlCenter.Components.Pages.Home;
+//using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace BlazorControlCenter.Services
 {
     public class ServerStateService
     {
+
+       // private readonly DbContext _dbContext;
+
+        //public ServerStateService(DbContext dbContext)
+        //{
+        //    _dbContext = dbContext;
+        //}
+
 
         private readonly object _lock = new object();
         public Dictionary<int, ArduinoClient> Clients { get; } = new Dictionary<int, ArduinoClient>();
@@ -19,7 +29,7 @@ namespace BlazorControlCenter.Services
         //state-modifying methods
         public void AddClient(TcpClient client, int id)
         {
-            var arduinoClient = new ArduinoClient { Id = id, TcpClient = client };
+            var arduinoClient = new ArduinoClient(client, id);
             lock (_lock)
             {
                 Clients[id] = arduinoClient;
@@ -62,41 +72,100 @@ namespace BlazorControlCenter.Services
             NotifyStateChanged();
         }
 
+        public async Task<bool> SendCommandAsync(int clientId, string command, CancellationToken ct = default)
+        {
+            TcpClient? tcp = null;
+            lock (_lock)
+            {
+                if (!Clients.TryGetValue(clientId, out var arduinoClient))
+                {
+                    AddLogMessage($"Send failed: client {clientId} not found.");
+                    return false;
+                }
+                tcp = arduinoClient.TcpClient;
+            }
+
+            try
+            {
+                if (tcp == null || !tcp.Connected)
+                {
+                    AddLogMessage($"Send failed: client {clientId} not connected.");
+                    return false;
+                }
+
+                var stream = tcp.GetStream();
+                var bytes = Encoding.UTF8.GetBytes(command.Trim() + "\n");
+                await stream.WriteAsync(bytes, 0, bytes.Length, ct);
+                await stream.FlushAsync(ct);
+
+                AddLogMessage($"Sent to Client {clientId}: {command}");
+                return true;
+            }
+            catch (ObjectDisposedException)
+            {
+                AddLogMessage($"Send failed: client {clientId} socket disposed.");
+                return false;
+            }
+            catch (IOException ex)
+            {
+                AddLogMessage($"Send failed (IO) to client {clientId}: {ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                AddLogMessage($"Send failed to client {clientId}: {ex.Message}");
+                return false;
+            }
+        }
+
         public void ProcessClientData(int clientId, string data)
         {
             var client = Clients.FirstOrDefault(c => c.Value.Id == clientId).Value;
             if (client == null) return;
 
-            string[] dataArray = data.Split(";"); //data coming in the form SCD4X;co2ppm;temperature(c);humidity
-            if (dataArray.Length == 4 && dataArray[0] == "SCD4X")
+            string[] dataArray = data.Split(";"); //data coming in the form SCD4X;co2ppm;temperature(c);humidity;hum_relay;fan_relay
+            if (dataArray[0] == "MAC")
             {
-                if (decimal.TryParse(dataArray[1], out decimal co2) &&
-                float.TryParse(dataArray[2], out float temp) &&
-                float.TryParse(dataArray[3], out float rh))
-                {
-                    temp = (temp * (9.0F / 5.0F)) + 32; //C to F
 
-                    Scd4xDataPoint dataPoint = new Scd4xDataPoint(co2, temp, rh, clientId);
+            }
+            else if (dataArray.Length == 6 && dataArray[0] == "SCD4X")
+            {
+                decimal.TryParse(dataArray[1], out decimal co2);
+                float.TryParse(dataArray[2], out float temp);
+                float.TryParse(dataArray[3], out float rh);
+                string hum_relay = dataArray[4];
+                string fan_relay = dataArray[5];
+                temp = (temp * (9.0F / 5.0F)) + 32; //C to F
 
-                    AddLogMessage($"Received from Client {clientId}: {co2} ppm | {temp.ToString("n2")}°F | {rh}%");
-                    
-                    //Fire event
-                    OnScd4xDataReady?.Invoke(dataPoint);
-                }
+                Scd4xDataPoint dataPoint = new Scd4xDataPoint(co2, temp, rh, clientId);
+
+                AddLogMessage($"Received from Client {clientId}:  " + data);
+
+                OnScd4xDataReady?.Invoke(dataPoint);
+
+            } else
+            {
+                AddLogMessage($"Unrecognized data from Client {clientId}:  " + data);
             }
         }
-
-
     }
 
     public class ArduinoClient
     {
         public int Id { get; set; }
+        public TcpClient TcpClient { get; }
+        public string Endpoint { get; }
 
-        public TcpClient TcpClient { get; set; } = null!;
-        public string Name => $"Client {Id} ({TcpClient.Client.RemoteEndPoint})";
+        public bool humState = false;
+        public bool fanState = false;
 
-        //public ApexCharts chart 
+        public ArduinoClient(TcpClient tcpClient, int id)
+        {
+            TcpClient = tcpClient;
+            Id = id;
+            Endpoint = TcpClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
+        }
+        public string Name => $"Client {Id} ({Endpoint})";
     }
 
     public class Scd4xDataPoint
@@ -105,8 +174,7 @@ namespace BlazorControlCenter.Services
         public decimal CO2 { get; set; }
         public float Temperature { get; set; }
         public float Humidity { get; set; }
-
-        public long Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        public string Timestamp { get; set; } = DateTime.UtcNow.ToString("hh:mm");
         public Scd4xDataPoint(decimal cO2, float temperature, float humidity, int id)
         {
             CO2 = cO2;
@@ -114,6 +182,5 @@ namespace BlazorControlCenter.Services
             Humidity = humidity;
             clientId = id;
         }
-
     }
 }

@@ -1,0 +1,19 @@
+﻿@page "/activity_log"
+@inject BlazorControlCenter.Services.ServerStateService StateService
+@attribute [StreamRendering]
+
+<PageTitle>Activity Log</PageTitle>
+
+<h1>Log</h1>
+
+<div class="col-8 d-flex flex-column">
+    <h3>Activity Log</h3>
+    <div id="log-container"
+         class="bg-dark text-white p-3 rounded flex-grow-1"
+         style="overflow-y: scroll; font-family: Consolas, monospace; font-size: 0.9em;">
+        @foreach (var msg in StateService.LogMessages)
+        {
+            <div>@msg</div>
+        }
+    </div>
+</div>

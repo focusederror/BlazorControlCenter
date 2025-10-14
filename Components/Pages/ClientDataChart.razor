@@ -1,0 +1,107 @@
+﻿@using BlazorControlCenter.Services
+@using ApexCharts
+
+<!-- CO2 -->
+<div style="height: 240px">
+    <ApexChart TItem="Scd4xDataPoint" Options="co2Options" @ref="chartCo2">
+        <ApexPointSeries TItem="Scd4xDataPoint"
+        Items="dataPoints"
+        Name="CO2 (ppm)"
+        SeriesType="SeriesType.Line"
+        XValue="e => e.Timestamp"
+        YValue="e => e.CO2" />
+    </ApexChart>
+</div>
+<!-- Temperature (wrapped for spacing instead of class on component) -->
+<div style="height: 240px">
+    <ApexChart TItem="Scd4xDataPoint" Options="tempOptions" @ref="chartTemp">
+        <ApexPointSeries TItem="Scd4xDataPoint"
+        Items="dataPoints"
+        Name="Temperature (°F)"
+        SeriesType="SeriesType.Line"
+        XValue="e => e.Timestamp"
+        YValue="e => (decimal)e.Temperature" />
+    </ApexChart>
+</div>
+
+<!-- Humidity (wrapped for spacing instead of class on component) -->
+<div style="height: 240px">
+    <ApexChart TItem="Scd4xDataPoint" Options="humidOptions" @ref="chartHumid">
+        <ApexPointSeries TItem="Scd4xDataPoint"
+        Items="dataPoints"
+        Name="Humidity (%)"
+        SeriesType="SeriesType.Line"
+        XValue="e => e.Timestamp"
+        YValue="e => (decimal)e.Humidity" />
+    </ApexChart>
+</div>
+
+
+@code {
+    private ApexChart<Scd4xDataPoint>? chartCo2;
+    private ApexChart<Scd4xDataPoint>? chartTemp;
+    private ApexChart<Scd4xDataPoint>? chartHumid;
+
+    private readonly List<Scd4xDataPoint> dataPoints = new();
+
+    // ---- Params from parent ----
+    [Parameter] public int ClientId { get; set; }
+    [Parameter] public EventCallback<(int id, ClientDataChart self)> OnRegistered { get; set; }
+    [Parameter] public ApexChartOptions<Scd4xDataPoint>? Options { get; set; }
+    [Parameter] public string? Title { get; set; }
+
+    // Per-chart options (we clone/derive from Options so we don’t mutate parent)
+    private ApexChartOptions<Scd4xDataPoint> co2Options = new();
+    private ApexChartOptions<Scd4xDataPoint> tempOptions = new();
+    private ApexChartOptions<Scd4xDataPoint> humidOptions = new();
+
+    protected override void OnInitialized()
+    {
+        // helper to shallow-clone the incoming options (avoid mutating the parent's instance)
+        ApexChartOptions<Scd4xDataPoint> Clone(ApexChartOptions<Scd4xDataPoint>? src) => new()
+            {
+                PlotOptions = src?.PlotOptions,
+                DataLabels = src?.DataLabels,
+                Stroke = src?.Stroke,
+                Xaxis = src?.Xaxis,
+                Yaxis = src?.Yaxis,
+                Legend = src?.Legend,
+                Tooltip = src?.Tooltip,
+                NoData = src?.NoData
+            };
+
+        co2Options = Clone(Options);
+        tempOptions = Clone(Options);
+        humidOptions = Clone(Options);
+
+        var baseTitle = Title ?? $"Client {ClientId}";
+        co2Options.Title = new Title { Text = $"{baseTitle} — CO2 (ppm)" };
+        tempOptions.Title = new Title { Text = $"{baseTitle} — Temperature (°F)" };
+        humidOptions.Title = new Title { Text = $"{baseTitle} — Humidity (%)" };
+
+        co2Options.Chart.Height = 220;
+        tempOptions.Chart.Height = 220;
+        humidOptions.Chart.Height = 220;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && OnRegistered.HasDelegate)
+            await OnRegistered.InvokeAsync((ClientId, this));
+    }
+
+    public async Task AddDataPointAsync(Scd4xDataPoint dataPoint)
+    {
+        dataPoints.Add(dataPoint);
+
+        // Keep recent window (tune as you like)
+        const int maxPoints = 300;
+        if (dataPoints.Count > maxPoints)
+            dataPoints.RemoveRange(0, dataPoints.Count - maxPoints);
+
+        // Update all three charts (no named args)
+        if (chartCo2 is not null) await chartCo2.UpdateSeriesAsync();
+        if (chartTemp is not null) await chartTemp.UpdateSeriesAsync();
+        if (chartHumid is not null) await chartHumid.UpdateSeriesAsync();
+    }
+}

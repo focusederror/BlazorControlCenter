@@ -1,4 +1,8 @@
 ﻿@inherits LayoutComponentBase
+@using MudBlazor
+
+<MudThemeProvider Theme="@MyTheme" />
+<MudSnackbarProvider />
 
 <div class="page">
     <div class="sidebar">
@@ -6,13 +10,9 @@
     </div>
 
     <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
-        <article class="content px-4">
+        <MudMainContent>
             @Body
-        </article>
+        </MudMainContent>
     </main>
 </div>
 
@@ -21,3 +21,19 @@
     <a href="" class="reload">Reload</a>
     <a class="dismiss">🗙</a>
 </div>
+
+
+@code {
+    private MudTheme MyTheme = new()
+    {
+        PaletteDark = new PaletteDark()
+        {
+            Primary = Colors.Green.Accent3,
+            Secondary = Colors.Blue.Lighten1,
+            Background = "#121212",
+            Surface = "#1E1E1E",
+            TextPrimary = "#E0E0E0",
+            TextSecondary = "#B0B0B0"
+        }
+    };
+}
