@@ -7,6 +7,9 @@
     --mud-palette-text-secondary: #b0b0b0;
 }
 
+
+
+
 body {
     background-color: var(--mud-palette-background);
     color: var(--mud-palette-text-primary);

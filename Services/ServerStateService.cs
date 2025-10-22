@@ -1,30 +1,33 @@
-﻿using System.Net.Sockets;
+﻿using Microsoft.EntityFrameworkCore;
+using Syncfusion.Blazor.Charts.Internal;
+using System.Net.Sockets;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-//using static BlazorControlCenter.Components.Pages.Home;
-//using static System.Runtime.InteropServices.JavaScript.JSType;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BlazorControlCenter.Services
 {
     public class ServerStateService
     {
-
-       // private readonly DbContext _dbContext;
-
-        //public ServerStateService(DbContext dbContext)
-        //{
-        //    _dbContext = dbContext;
-        //}
-
-
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly object _lock = new object();
         public Dictionary<int, ArduinoClient> Clients { get; } = new Dictionary<int, ArduinoClient>();
         public List<string> LogMessages { get; } = new List<string>();
+
         public event Action<Scd4xDataPoint>? OnScd4xDataReady;
+        public event Action<int, bool, bool>? RelayStateChanged;
+
 
         //Events
         public event Action? OnChange;
+        public event Action? OnLogChange;
         private void NotifyStateChanged() => OnChange?.Invoke();
+        private void NotifyLogChanged() => OnLogChange?.Invoke();
+
+        public ServerStateService(IServiceScopeFactory scopeFactory)
+        {
+            _scopeFactory = scopeFactory;
+        }
 
         //state-modifying methods
         public void AddClient(TcpClient client, int id)
@@ -70,6 +73,7 @@ namespace BlazorControlCenter.Services
                 }
             }
             NotifyStateChanged();
+            OnLogChange?.Invoke();
         }
 
         public async Task<bool> SendCommandAsync(int clientId, string command, CancellationToken ct = default)
@@ -117,24 +121,34 @@ namespace BlazorControlCenter.Services
                 return false;
             }
         }
-
         public void ProcessClientData(int clientId, string data)
         {
             var client = Clients.FirstOrDefault(c => c.Value.Id == clientId).Value;
             if (client == null) return;
 
             string[] dataArray = data.Split(";"); //data coming in the form SCD4X;co2ppm;temperature(c);humidity;hum_relay;fan_relay
-            if (dataArray[0] == "MAC")
-            {
 
-            }
-            else if (dataArray.Length == 6 && dataArray[0] == "SCD4X")
+            string hum_relay = "null";
+            string fan_relay = "null";
+
+            AddLogMessage(data);
+
+            if (dataArray[0] == "MAC") {
+                //tbd
+            } 
+            else if (dataArray[0] == "RELAY_UPDATE") 
+            {
+                hum_relay = dataArray[1];
+                fan_relay = dataArray[2];
+            } 
+            else if (dataArray.Length == 6 && dataArray[0] == "SCD4X") 
             {
                 decimal.TryParse(dataArray[1], out decimal co2);
                 float.TryParse(dataArray[2], out float temp);
                 float.TryParse(dataArray[3], out float rh);
-                string hum_relay = dataArray[4];
-                string fan_relay = dataArray[5];
+                hum_relay = dataArray[4];
+                fan_relay = dataArray[5];
+                
                 temp = (temp * (9.0F / 5.0F)) + 32; //C to F
 
                 Scd4xDataPoint dataPoint = new Scd4xDataPoint(co2, temp, rh, clientId);
@@ -142,11 +156,54 @@ namespace BlazorControlCenter.Services
                 AddLogMessage($"Received from Client {clientId}:  " + data);
 
                 OnScd4xDataReady?.Invoke(dataPoint);
+                using (var scope = _scopeFactory.CreateScope())
+                {
+                    try
+                    {
+                        // 2. Get your DbContext from this new scope.
+                        //    (Replace 'YourDbContext' with your real context class)
+                        //var dbContext = scope.ServiceProvider.GetRequiredService<YourDbContext>();
 
-            } else
+                        // 3. Add the data to the context
+                        //dbContext.Scd4xDataPoints.Add(dataPoint); // (Assuming your DbSet is named Scd4xDataPoints)
+
+                        // 4. Save the changes to the database
+                        //dbContext.SaveChanges(); // Use SaveChangesAsync() if you make this method async
+                    }
+                    catch (Exception ex)
+                    {
+                        // Always log errors from database operations
+                        AddLogMessage($"DATABASE ERROR: {ex.Message}");
+                    }
+                }
+                // --- END OF DATABASE LOGIC ---
+            }
+            else 
             {
                 AddLogMessage($"Unrecognized data from Client {clientId}:  " + data);
             }
+
+            UpdateRelayStates(clientId, Convert.ToBoolean(hum_relay), Convert.ToBoolean(fan_relay));
+        }
+        public void UpdateRelayStates(int clientId, bool clientHum, bool clientFan)
+        {
+            AddLogMessage("Entered UpdateRelayStates()");
+            ArduinoClient? c;
+            lock (_lock)
+            {
+                if (!Clients.TryGetValue(clientId, out c)) return;
+
+                var changed = (c.humState != clientHum) || (c.fanState != clientFan);
+                if (!changed) return;
+
+                c.humState = clientHum;
+                c.fanState = clientFan;
+            }
+            RaiseRelayStateChanged(clientId, clientHum, clientFan);
+        }
+        private void RaiseRelayStateChanged(int clientId, bool humidOn, bool fanOn)
+        {
+            RelayStateChanged?.Invoke(clientId, humidOn, fanOn);
         }
     }
 
@@ -155,17 +212,16 @@ namespace BlazorControlCenter.Services
         public int Id { get; set; }
         public TcpClient TcpClient { get; }
         public string Endpoint { get; }
-
-        public bool humState = false;
-        public bool fanState = false;
-
+        public DateTime lastSeen = DateTime.UtcNow;
+        public bool humState;
+        public bool fanState;
         public ArduinoClient(TcpClient tcpClient, int id)
         {
             TcpClient = tcpClient;
             Id = id;
             Endpoint = TcpClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
         }
-        public string Name => $"Client {Id} ({Endpoint})";
+        public string Name => $"Client {Id} ({Endpoint.Replace(':','-')})";
     }
 
     public class Scd4xDataPoint
@@ -175,6 +231,7 @@ namespace BlazorControlCenter.Services
         public float Temperature { get; set; }
         public float Humidity { get; set; }
         public string Timestamp { get; set; } = DateTime.UtcNow.ToString("hh:mm");
+        
         public Scd4xDataPoint(decimal cO2, float temperature, float humidity, int id)
         {
             CO2 = cO2;

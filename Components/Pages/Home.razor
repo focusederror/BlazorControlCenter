@@ -6,6 +6,8 @@
 @using ApexCharts
 @using Syncfusion.Blazor.Buttons
 @using MudBlazor
+@using MudBlazor.FontIcons.MaterialSymbols
+
 
 <PageTitle>Arduino Dashboard</PageTitle>
 
@@ -14,52 +16,53 @@
         <h1>Arduino TCP Dashboard</h1>
     </header>
 
-    <!-- Column layout not needed anymore; just let this column scroll -->
     <main class="d-flex flex-column h-100">
         <h3 class="mb-3">Connected Clients</h3>
 
-        <!-- Scrollable area for everything below the header -->
         <div class="flex-grow-1 overflow-auto">
             @if (StateService.Clients.Any())
             {
                 <div class="list-group">
                     @foreach (var client in StateService.Clients.Values.OrderBy(c => c.Id))
                     {
-                        <!-- Row with client name + command input + send button -->
+                        var currentClient = client;
+
                         <div class="list-group-item">
                             <div class="d-flex align-items-center gap-2">
-                                <span class="fw-bold flex-grow-1">@client.Name</span>
+                                <span class="fw-bold flex-grow-1">@currentClient.Name</span>
 
-                                <MudToggleIconButton @bind-Toggled="AlarmOn"
-                                    Icon="@Icons.Material.Filled.AlarmOff"
-                                    Color="@MudBlazor.Color.Error"
-                                    ToggledIcon="@Icons.Material.Filled.AlarmOn"
-                                    ToggledColor="@MudBlazor.Color.Success"
-                                    title="@(AlarmOn ? "On" : "Off")" />
+                                <MudToggleIconButton Toggled="@currentClient.humState"
+                                                     ToggledChanged="(newState) => OnHumidToggleChanged(currentClient.Id, newState)"
+                                                     Icon="@MudBlazor.FontIcons.MaterialSymbols.Outlined.HumidityLow"
+                                                     Color="@MudBlazor.Color.Error"
+                                                     ToggledIcon="@MudBlazor.FontIcons.MaterialSymbols.Outlined.HumidityHigh"
+                                                     ToggledColor="@MudBlazor.Color.Success"
+                                                     title="@(currentClient.humState ? "Turn Off" : "Turn On")" />
 
-                                <span>Alarm is @(AlarmOn ? "On" : "Off")</span>
-                                    
+                                <span>Humidifier is @(currentClient.humState ? "On" : "Off")</span>
+
+                                <MudToggleIconButton Toggled="@currentClient.fanState"
+                                                     ToggledChanged="(newState) => OnFanToggleChanged(currentClient.Id, newState)"
+                                                     Icon="@Icons.Material.Filled.ModeFanOff"
+                                                     Color="@MudBlazor.Color.Error"
+                                                     ToggledIcon="@MudBlazor.FontIcons.MaterialSymbols.Outlined.ModeFan"
+                                                     ToggledColor="@MudBlazor.Color.Success"
+                                                     title="@(currentClient.fanState ? "Turn Off" : "Turn On")" />
+
+                                <span>Fan is @(currentClient.fanState ? "On" : "Off")</span>
 
                                 <input class="form-control form-control-sm"
                                        style="max-width: 220px"
                                        placeholder="Type command…"
-                                       value="@GetCommand(client.Id)"
-                                       @oninput="(e) => SetCommand(client.Id, e?.Value?.ToString() ?? string.Empty)" />
+                                       value="@GetCommand(currentClient.Id)"
+                                       @oninput="(e) => SetCommand(currentClient.Id, e?.Value?.ToString() ?? string.Empty)" />
 
                                 <button class="btn btn-primary btn-sm"
-                                        @onclick="() => SendToClientAsync(client.Id)"
+                                        @onclick="() => SendToClientAsync(currentClient.Id)"
                                         title="Send to this client">
                                     Send
                                 </button>
                             </div>
-                        </div>
-
-                        <!-- Charts live OUTSIDE the list item so they can expand to their heights -->
-                        <div class="mb-4 px-3">
-                            <ClientDataChart ClientId="@client.Id"
-                                             OnRegistered="RegisterChartRef"
-                                             Options="options"
-                                             Title="@client.Name" />
                         </div>
                     }
                 </div>
@@ -75,59 +78,44 @@
 </div>
 
 @code {
-    private readonly Dictionary<int, ClientDataChart> clientChartRef = new();
     private readonly Dictionary<int, string> commandByClient = new();
-    private ApexChartOptions<Scd4xDataPoint> options = new();
-
-    public bool AlarmOn { get; set; }
-
-
-    void ClickMe() => Console.WriteLine("Button clicked!");
 
     protected override void OnInitialized()
     {
-        options.PlotOptions = new PlotOptions
-            {
-                Line = new PlotOptionsLine { /* customize colors/styles if needed */ }
-            };
-
-        StateService.OnScd4xDataReady += UpdateChartData;
         StateService.OnChange += OnClientsChanged;
+        StateService.RelayStateChanged += OnRelayChanged;
+    }
+
+    private void OnRelayChanged(int clientId, bool humidOn, bool fanOn)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHumidToggleChanged(int id, bool newState)
+    {
+        string command = newState ? "HUM_ON" : "HUM_OFF";
+        StateService.AddLogMessage($"UI toggle for client {id}: sending command '{command}'");
+        SetCommand(id, command);
+        await SendToClientAsync(id);
+    }
+
+    private async Task OnFanToggleChanged(int id, bool newState)
+    {
+        string command = newState ? "FAN_ON" : "FAN_OFF";
+        StateService.AddLogMessage($"UI toggle for client {id}: sending command '{command}'");
+        SetCommand(id, command);
+        await SendToClientAsync(id);
     }
 
     private void OnClientsChanged()
     {
         var connectedIds = StateService.Clients.Keys.ToHashSet();
-
-        // remove stale chart refs
-        foreach (var key in clientChartRef.Keys.Where(k => !connectedIds.Contains(k)).ToList())
-            clientChartRef.Remove(key);
-
-        // remove stale command inputs
+        //remove stale command inputs
         foreach (var key in commandByClient.Keys.Where(k => !connectedIds.Contains(k)).ToList())
-            commandByClient.Remove(key);
-
-        InvokeAsync(StateHasChanged);
-    }
-
-    // child chart calls this during first render
-    private async Task RegisterChartRef((int id, ClientDataChart self) reg)
-    {
-        clientChartRef[reg.id] = reg.self;
-        return;
-        // await reg.self.AddDataPointAsync(new Scd4xDataPoint(800m, 40f, 40f, reg.id));
-    }
-
-    // dispatcher-safe update to chart
-    private void UpdateChartData(Scd4xDataPoint dataPoint)
-    {
-        _ = InvokeAsync(async () =>
         {
-            if (clientChartRef.TryGetValue(dataPoint.clientId, out var chart) && chart is not null)
-            {
-                await chart.AddDataPointAsync(dataPoint);
-            }
-        });
+            commandByClient.Remove(key);
+        }
+        InvokeAsync(StateHasChanged);
     }
 
     private string GetCommand(int clientId) =>
@@ -139,7 +127,10 @@
     private async Task SendToClientAsync(int clientId)
     {
         if (!commandByClient.TryGetValue(clientId, out var cmd) || string.IsNullOrWhiteSpace(cmd))
+        {
+            StateService.AddLogMessage($"Failed to find command for the specified client: {clientId}");
             return;
+        }
 
         var ok = await StateService.SendCommandAsync(clientId, cmd.Trim());
         if (ok)
@@ -151,7 +142,7 @@
 
     public void Dispose()
     {
-        StateService.OnScd4xDataReady -= UpdateChartData;
         StateService.OnChange -= OnClientsChanged;
+        StateService.RelayStateChanged -= OnRelayChanged;
     }
 }
